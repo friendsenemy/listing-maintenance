@@ -71,6 +71,22 @@ def is_sign(title):
     return "PORCELAIN" in t and not NOT_A_SIGN.search(t)
 
 
+def eligible_for_refresh(item):
+    """Auctions are excluded outright.
+
+    Their price is a deliberate opening bid, not a catalogue price, so
+    repricing one to a tier would destroy the seller's intent — and ending an
+    auction that already has bids is worse still. The tiers, the end/relist
+    cycle and the store categories are all fixed-price concepts.
+    """
+    return (
+        item["type"] == "FixedPriceItem"
+        and is_sign(item["title"])
+        and item["watch"] < WATCH_SKIP
+        and item["bids"] == 0
+    )
+
+
 def bucket(title):
     t = title.upper()
     if "DAVID MANN" in t or "ED ROTH" in t or "BIKER" in t:
@@ -112,6 +128,8 @@ def active_listings():
                 "watch": int(eb.tag(chunk, "WatchCount", "0") or 0),
                 "bids": int(eb.tag(chunk, "BidCount", "0") or 0),
                 "price": float(eb.tag(chunk, "CurrentPrice", "0") or 0),
+                # "FixedPriceItem" or "Chinese" (an auction).
+                "type": eb.tag(chunk, "ListingType"),
             })
         total = int(eb.tag(xml, "TotalNumberOfPages", "1") or 1)
         if page >= total:
@@ -125,7 +143,10 @@ def attention_report(listings):
     lines = []
 
     signs = [x for x in listings if is_sign(x["title"])]
+    auctions = [x for x in listings if x["type"] != "FixedPriceItem"]
     lines.append(f"Active listings: {len(listings)} ({len(signs)} signs)")
+    if auctions:
+        lines.append(f"Auctions left untouched: {len(auctions)}")
 
     ack, xml, _ = eb.call(
         "GetMyeBaySelling",
@@ -229,8 +250,7 @@ def main():
     for line in attention_report(listings):
         print(line)
 
-    eligible = [x for x in listings
-                if is_sign(x["title"]) and x["watch"] < WATCH_SKIP and x["bids"] == 0]
+    eligible = [x for x in listings if eligible_for_refresh(x)]
     eligible.sort(key=lambda x: x["start"])
     todo = eligible[:BATCH]
 
