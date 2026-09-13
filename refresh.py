@@ -12,16 +12,21 @@ import ebay_client as eb
 
 BATCH = 12          # listings refreshed per run
 WATCH_SKIP = 3      # ending a listing loses its watchers; leave watched ones alone
-FLOOR = 89.00
+FLOOR = 89.00 + 25.00   # list-price floor; buyer sees $89 after the sale
 
+# LIST prices. A store-wide "$25 off" sale event (rule-based, auto-includes
+# new item ids) takes every one of these down to the real selling tier, so
+# the buyer pays $99.47 / $119.47 / $169.47 and sees a strikethrough. If the
+# sale event ever lapses, these are $25 too high — renew it, don't edit these.
+MARKDOWN = 25.00
 PRICE = {
-    "biker": 99.47,
-    "thermo": 169.47,
-    "nascar": 119.47,
-    "gasoil": 119.47,
-    "pinup": 119.47,
-    "soda": 119.47,
-    "other": 119.47,
+    "biker": 99.47 + MARKDOWN,
+    "thermo": 169.47 + MARKDOWN,
+    "nascar": 119.47 + MARKDOWN,
+    "gasoil": 119.47 + MARKDOWN,
+    "pinup": 119.47 + MARKDOWN,
+    "soda": 119.47 + MARKDOWN,
+    "other": 119.47 + MARKDOWN,
 }
 
 STORE_CATEGORY = {
@@ -68,7 +73,7 @@ NOT_A_SIGN = re.compile(
 
 def is_sign(title):
     t = title.upper()
-    return "PORCELAIN" in t and not NOT_A_SIGN.search(t)
+    return ("PORCELAIN" in t or "PUMP PLATE" in t) and not NOT_A_SIGN.search(t)
 
 
 def eligible_for_refresh(item):
