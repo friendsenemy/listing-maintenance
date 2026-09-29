@@ -1,0 +1,61 @@
+name: ebay bots
+
+on:
+  schedule:
+    # 12:13 and 22:13 UTC. Off the hour on purpose: scheduled jobs queued
+    # exactly on :00 are the ones GitHub delays most under load.
+    - cron: "13 12,22 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would be sent without sending it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write         # needed to commit thanked.json back
+
+# Two runs must never overlap: both read and write thanked.json, and a buyer
+# messaged twice is worse than a buyer messaged late.
+concurrency:
+  group: ebay-bots
+  cancel-in-progress: false
+
+jobs:
+  bots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run the bots
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_REFRESH_TOKEN: ${{ secrets.EBAY_REFRESH_TOKEN }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python run_bots.py
+          else
+            python run_bots.py --apply
+          fi
+
+      - name: Commit the dedupe state
+        # thanked.json is the ONLY thing stopping a buyer being thanked twice.
+        # It must be committed even when a bot failed, because the other bot
+        # may already have sent - hence always().
+        if: always()
+        run: |
+          git config user.name  "ebay bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add thanked.json || true
+          git diff --staged --quiet || git commit -m "thanked.json: record messages sent"
+          # Another run (or the daily heartbeat) may have pushed meanwhile.
+          git pull --rebase --autostash || true
+          git push || true
