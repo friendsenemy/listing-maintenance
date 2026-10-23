@@ -1,10 +1,13 @@
-"""Both eBay bots, one entry point, for the twice-daily GitHub Actions job.
+"""All three eBay bots, one entry point, for the twice-daily GitHub Actions job.
 
-  msg_bot     - answers buyer questions that can be read off the listing's own
-                data (size, shipping, returns, combining, international) and
-                escalates everything touching condition, authenticity or price
-  thanks_bot  - one thank-you per SIGN order, naming the collecting theme and
-                asking what else the buyer is hunting for
+  msg_bot       - answers buyer questions that can be read off the listing's own
+                  data (size, shipping, returns, combining, international) and
+                  escalates everything touching condition, authenticity or price
+  thanks_bot    - one thank-you per SIGN order, naming the collecting theme and
+                  asking what else the buyer is hunting for
+  feedback_bot  - replies to every POSITIVE feedback left for us; neutral and
+                  negative are never touched, and eBay's own automated feedback
+                  is skipped. Dedupe is the reply on the feedback record itself.
 
 WHY THIS RUNS ON GITHUB ACTIONS AND NOT AS A SCHEDULED CLAUDE TASK
     It used to be a Claude scheduled task. Every firing started a fresh
@@ -13,14 +16,14 @@ WHY THIS RUNS ON GITHUB ACTIONS AND NOT AS A SCHEDULED CLAUDE TASK
     notifications off - indistinguishable from a quiet week. Here the code is
     checked out with the job, so there is nothing to be absent.
 
-Neither bot is allowed to take the other down: each runs in its own
-try/except so a failure in one still lets the other do its job, and the
-traceback is printed rather than swallowed.
+No bot is allowed to take another down: each runs in its own try/except so a
+failure in one still lets the others do their job, and the traceback is
+printed rather than swallowed.
 
-Exit code is 0 unless BOTH bots raised - a partial failure still needs the
+Exit code is 0 unless EVERY bot raised - a partial failure still needs the
 thanked.json commit to happen, or the surviving bot repeats itself next run.
 
-Run with --apply to send for real; no args is a dry run of both.
+Run with --apply to send for real; no args is a dry run of all three.
 """
 import os
 import sys
@@ -49,16 +52,24 @@ def stage(name, fn):
 
 
 def main():
+    import feedback_bot
     import msg_bot
     import thanks_bot
 
     _, e1 = stage("buyer questions", msg_bot.run)
     _, e2 = stage("post-purchase thank-you", thanks_bot.run)
+    r3, e3 = stage("positive feedback replies", feedback_bot.run)
 
     note(f"### eBay bots ({'live' if APPLY else 'dry run'})")
     note("")
     note(f"- buyer questions: {'FAILED - ' + e1 if e1 else 'ok'}")
     note(f"- thank-you messages: {'FAILED - ' + e2 if e2 else 'ok'}")
+    if e3:
+        note(f"- feedback replies: FAILED - {e3}")
+    else:
+        note(f"- feedback replies: {r3['sent'] if APPLY else r3['candidates']} "
+             f"{'sent' if APPLY else 'would be sent'}"
+             f"{', ' + str(r3['failed']) + ' failed' if r3['failed'] else ''}")
     note("")
     note("Full counts and any escalated buyer questions are in the step log above.")
 
@@ -67,7 +78,7 @@ def main():
             fh.write("\n".join(_lines) + "\n")
 
     print("\ndone", flush=True)
-    if e1 and e2:
+    if e1 and e2 and e3:
         sys.exit(1)
 
 
